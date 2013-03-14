@@ -197,6 +197,27 @@ static void sfcb_add_version(FILE * f, unsigned short opt, int endianMode)
    fwrite(&rec,size,1,f);
 }
 
+static int skipQuals(qual_chain* quals) {
+  if (sfcb_options & BACKEND_SFCB_NO_QUALIFIERS) {
+    return (quals->qual_qual->qual_type.type_base == BaseTypeSTRING);
+  }
+
+  if (sfcb_options & BACKEND_SFCB_REDUCED_QUALIFIERS) {
+    return (strcasecmp("description",quals->qual_id) == 0 ||
+	    strcasecmp("arraytype",quals->qual_id) == 0 ||
+	    strcasecmp("deprecated",quals->qual_id) == 0 ||
+	    strcasecmp("mappingstrings",quals->qual_id) == 0 ||
+	    strcasecmp("punit",quals->qual_id) == 0 ||
+	    strcasecmp("umlpackagepath",quals->qual_id) == 0 ||
+	    strcasecmp("units",quals->qual_id) == 0 ||
+	    strcasecmp("version",quals->qual_id) == 0 ||
+	    strcasecmp("valuemap",quals->qual_id) == 0 ||
+	    strcasecmp("values",quals->qual_id) == 0);
+  }
+
+  return 0;
+}
+
 static int sfcb_add_class(FILE * f, hashentry * he, class_entry * ce, int endianMode)
 {
   /* SFCB related */
@@ -222,19 +243,13 @@ static int sfcb_add_class(FILE * f, hashentry * he, class_entry * ce, int endian
   if ( ce -> class_parent) {
     sfcb_add_class( f, he, ce -> class_parent, endianMode ); 
   }
-  if ( htlookup( he, 
-		 upstrdup(ce -> class_id, 
-			  strlen(ce -> class_id)), 
-		 strlen(ce -> class_id))
-       == NULL ) {
+  if ( htlookup(he, upstrdup(ce -> class_id, strlen(ce -> class_id)), 
+                strlen(ce -> class_id))  == NULL ) {
     if (sfcb_options & BACKEND_VERBOSE) {
       fprintf(stderr,"  adding class %s \n", ce -> class_id );
     }
     /* remember we did this class already */
-    htinsert( he, 
-	      upstrdup(ce -> class_id, 
-		       strlen(ce -> class_id)), strlen(ce -> class_id),
-	      (void *)1); 
+    htinsert(he, upstrdup(ce -> class_id, strlen(ce -> class_id)), strlen(ce -> class_id), (void *)1); 
     sfcbClass = ClClassNew( ce -> class_id, 
 			    ce -> class_parent ? 
 			    ce -> class_parent -> class_id : NULL );
@@ -247,11 +262,12 @@ static int sfcb_add_class(FILE * f, hashentry * he, class_entry * ce, int endian
 	fprintf(stderr,"    adding qualifier %s for class %s \n", 
 		quals -> qual_id, ce -> class_id );
       }
-      ClClassAddQualifier(&sfcbClass->hdr, &sfcbClass->qualifiers,
-                          quals->qual_id,
-                          make_cmpi_data(quals->qual_qual->qual_type,
-                                         quals->qual_qual->qual_array,
-                                         quals->qual_vals));
+      if (!skipQuals(quals)) {
+        ClClassAddQualifier(&sfcbClass->hdr, &sfcbClass->qualifiers, quals->qual_id,
+                            make_cmpi_data(quals->qual_qual->qual_type,
+                                           quals->qual_qual->qual_array,
+                                           quals->qual_vals));
+      }
       quals = quals -> qual_next;
     }
     while (props) {
@@ -274,22 +290,17 @@ static int sfcb_add_class(FILE * f, hashentry * he, class_entry * ce, int endian
       quals = props -> prop_quals;
       sfcbProp=((ClProperty*)ClObjectGetClSection(&sfcbClass->hdr,&sfcbClass->properties))+prop_id-1;
       while (quals) {
-	if ( (sfcb_options & BACKEND_SFCB_REDUCED_QUALIFIERS) == 0 ||
-	    (strcasecmp("description",quals->qual_id) &&
-	     strcasecmp("valuemap",quals->qual_id) &&
-	     strcasecmp("values",quals->qual_id) ) ) {
-	  if (sfcb_options & BACKEND_VERBOSE) {
-	    fprintf(stderr,"        adding qualifier %s for property %s in class %s\n", 
-		    quals -> qual_id, props -> prop_id, ce -> class_id );
-	  }
-          ClClassAddPropertyQualifier(&sfcbClass->hdr,
-                                      sfcbProp,
-                                      quals->qual_id,
+        if (!skipQuals(quals)) {
+          if (sfcb_options & BACKEND_VERBOSE) {
+            fprintf(stderr,"        adding qualifier %s for property %s in class %s\n", 
+                    quals -> qual_id, props -> prop_id, ce -> class_id );
+          }
+          ClClassAddPropertyQualifier(&sfcbClass->hdr, sfcbProp, quals->qual_id,
                                       make_cmpi_data(quals->qual_qual->qual_type,
                                                      quals->qual_qual->qual_array,
                                                      quals->qual_vals));
-	}
-	quals = quals -> qual_next;
+        }
+        quals = quals -> qual_next;
       }
       props = props -> prop_next;
     }
@@ -299,13 +310,13 @@ static int sfcb_add_class(FILE * f, hashentry * he, class_entry * ce, int endian
     	quals = meths->method_quals;
     	sfcbMeth=((ClMethod*)ClObjectGetClSection(&sfcbClass->hdr,&sfcbClass->methods))+meth_id-1;
     	while(quals) {
-    		ClClassAddMethodQualifier(&sfcbClass->hdr,
-    				sfcbMeth,
-    				quals->qual_id,
-    				make_cmpi_data(quals->qual_qual->qual_type,
-					       quals->qual_qual->qual_array,
-					       quals->qual_vals));
-			quals = quals->qual_next;
+          if (!skipQuals(quals)) {
+            ClClassAddMethodQualifier(&sfcbClass->hdr, sfcbMeth, quals->qual_id,
+                                      make_cmpi_data(quals->qual_qual->qual_type,
+                                                     quals->qual_qual->qual_array,
+                                                     quals->qual_vals));
+          }
+	  quals = quals->qual_next;
     	}
     	meth_params = meths->method_params;
     	while(meth_params && meth_params->param_id) {
@@ -323,15 +334,14 @@ static int sfcb_add_class(FILE * f, hashentry * he, class_entry * ce, int endian
     		quals = meth_params->param_quals;
     		sfcbParam=((ClParameter*)ClObjectGetClSection(&sfcbClass->hdr,&sfcbMeth->parameters))+meth_param_id-1;
     		while(quals) {
-    			ClClassAddMethParamQualifier(&sfcbClass->hdr,
-    								sfcbParam,
-    								quals->qual_id,
-    								make_cmpi_data(quals->qual_qual->qual_type,
-					       				quals->qual_qual->qual_array,
-					       				quals->qual_vals));
-				quals = quals->qual_next;   								
-    						
-    		}
+                  if (!skipQuals(quals)) {
+                    ClClassAddMethParamQualifier(&sfcbClass->hdr, sfcbParam, quals->qual_id,
+                                                 make_cmpi_data(quals->qual_qual->qual_type,
+                                                                quals->qual_qual->qual_array,
+                                                                quals->qual_vals));
+                  }
+                  quals = quals->qual_next;
+                }
     		meth_params = meth_params->param_next;
     	}
 
