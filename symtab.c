@@ -517,8 +517,8 @@ char * make_string(const char * string)
   int length = strlen(string);
   int a,i;
   for(i = 1, a=0; i < length-1; i++) {
-  	//eliminate escaping backslashs
-  	if(!(string[i] == '\\' && string[i+1] == '"')) {
+       //eliminate escaping backslashs of quotes
+       if(!(string[i] == '\\' && (string[i+1] == '"' || string[i+1] == '\''))) {
   		dups[a++] = string[i];
   	}
   }
